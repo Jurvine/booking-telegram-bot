@@ -1,7 +1,10 @@
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup
 
-from app.keyboards.services import services_menu
+from app.keyboards.main import main_menu
+from app.keyboards.services import dates_menu, masters_menu, services_menu, times_menu
+from app.states.booking import Booking
 
 router = Router()
 
@@ -13,12 +16,13 @@ SERVICES = {
 
 
 @router.message(F.text == "Записаться")
-async def show_services(message: Message) -> None:
+async def show_services(message: Message, state: FSMContext) -> None:
+    await state.clear()
     await message.answer("Выберите услугу:", reply_markup=services_menu())
 
 
 @router.callback_query(F.data.startswith("service:"))
-async def select_service(callback: CallbackQuery) -> None:
+async def select_service(callback: CallbackQuery, state: FSMContext) -> None:
     service_id = callback.data.split(":", maxsplit=1)[1]
     service_name = SERVICES.get(service_id)
     if service_name is None:
@@ -26,10 +30,73 @@ async def select_service(callback: CallbackQuery) -> None:
         return
 
     await callback.answer()
+    await state.update_data(service=service_name)
+    if callback.message:
+        await callback.message.answer("Выберите мастера:", reply_markup=masters_menu())
+
+
+@router.callback_query(F.data.startswith("master:"))
+async def select_master(callback: CallbackQuery, state: FSMContext) -> None:
+    master = callback.data.split(":", maxsplit=1)[1]
+    await state.update_data(master=master)
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Выберите дату:", reply_markup=dates_menu())
+
+
+@router.callback_query(F.data.startswith("date:"))
+async def select_date(callback: CallbackQuery, state: FSMContext) -> None:
+    booking_date = callback.data.split(":", maxsplit=1)[1]
+    await state.update_data(date=booking_date)
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Выберите время:", reply_markup=times_menu())
+
+
+@router.callback_query(F.data.startswith("time:"))
+async def select_time(callback: CallbackQuery, state: FSMContext) -> None:
+    booking_time = callback.data.split(":", maxsplit=1)[1]
+    await state.update_data(time=booking_time)
+    await state.set_state(Booking.waiting_phone)
+    await callback.answer()
     if callback.message:
         await callback.message.answer(
-            f"Вы выбрали: {service_name}\n\nСледующий шаг — выбор мастера."
+            "Отправьте номер телефона кнопкой ниже или напишите его сообщением.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Отправить телефон", request_contact=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True,
+            ),
         )
+
+
+@router.message(Booking.waiting_phone, F.contact)
+async def receive_contact(message: Message, state: FSMContext) -> None:
+    await finish_booking(message, state, message.contact.phone_number)
+
+
+@router.message(Booking.waiting_phone, F.text)
+async def receive_phone_text(message: Message, state: FSMContext) -> None:
+    phone = message.text.strip()
+    digits = "".join(character for character in phone if character.isdigit())
+    if len(digits) < 10:
+        await message.answer("Похоже, номер неполный. Введите его ещё раз.")
+        return
+    await finish_booking(message, state, phone)
+
+
+async def finish_booking(message: Message, state: FSMContext, phone: str) -> None:
+    data = await state.get_data()
+    await message.answer(
+        "Запись подтверждена! ✅\n\n"
+        f"Услуга: {data['service']}\n"
+        f"Мастер: {data['master']}\n"
+        f"Дата: {data['date']}\n"
+        f"Время: {data['time']}\n"
+        f"Телефон: {phone}",
+        reply_markup=main_menu(),
+    )
+    await state.clear()
 
 
 @router.message(F.text == "Мои записи")
@@ -44,4 +111,3 @@ async def show_contacts(message: Message) -> None:
         "Ежедневно: 10:00–21:00\n"
         "Телефон: +7 (900) 000-00-00"
     )
-
