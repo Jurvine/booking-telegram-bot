@@ -10,9 +10,21 @@ from aiogram.types import (
 )
 
 from app.keyboards.main import main_menu
-from app.keyboards.services import dates_menu, masters_menu, services_menu, times_menu
+from app.keyboards.services import (
+    AVAILABLE_TIMES,
+    dates_menu,
+    masters_menu,
+    services_menu,
+    times_menu,
+)
 from app.states.booking import Booking
-from app.storage import cancel_booking, create_booking, get_active_bookings
+from app.storage import (
+    cancel_booking,
+    create_booking,
+    get_active_bookings,
+    get_unavailable_times,
+    is_slot_available,
+)
 
 router = Router()
 
@@ -58,12 +70,23 @@ async def select_date(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(date=booking_date)
     await callback.answer()
     if callback.message:
-        await callback.message.answer("Выберите время:", reply_markup=times_menu())
+        data = await state.get_data()
+        unavailable = get_unavailable_times(data["master"], booking_date)
+        if unavailable == set(AVAILABLE_TIMES):
+            await callback.message.answer("На эту дату свободного времени нет.")
+            return
+        await callback.message.answer(
+            "Выберите время:", reply_markup=times_menu(unavailable)
+        )
 
 
 @router.callback_query(F.data.startswith("time:"))
 async def select_time(callback: CallbackQuery, state: FSMContext) -> None:
     booking_time = callback.data.split(":", maxsplit=1)[1]
+    data = await state.get_data()
+    if not is_slot_available(data["master"], data["date"], booking_time):
+        await callback.answer("Это время уже занято", show_alert=True)
+        return
     await state.update_data(time=booking_time)
     await state.set_state(Booking.waiting_phone)
     await callback.answer()
@@ -95,7 +118,7 @@ async def receive_phone_text(message: Message, state: FSMContext) -> None:
 
 async def finish_booking(message: Message, state: FSMContext, phone: str) -> None:
     data = await state.get_data()
-    create_booking(
+    result = create_booking(
         user_id=message.from_user.id,
         service=data["service"],
         master=data["master"],
@@ -103,10 +126,20 @@ async def finish_booking(message: Message, state: FSMContext, phone: str) -> Non
         booking_time=data["time"],
         phone=phone,
     )
+    if result is None:
+        unavailable = get_unavailable_times(data["master"], data["date"])
+        await state.set_state(None)
+        await message.answer(
+            "Пока вы вводили телефон, это время заняли. Выберите другое:",
+            reply_markup=times_menu(unavailable),
+        )
+        return
+
+    _, assigned_master = result
     await message.answer(
         "Запись подтверждена! ✅\n\n"
         f"Услуга: {data['service']}\n"
-        f"Мастер: {data['master']}\n"
+        f"Мастер: {assigned_master}\n"
         f"Дата: {data['date']}\n"
         f"Время: {data['time']}\n"
         f"Телефон: {phone}",

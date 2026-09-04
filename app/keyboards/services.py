@@ -2,6 +2,8 @@ from datetime import date, timedelta
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+AVAILABLE_TIMES = ("10:00", "12:00", "14:00", "16:00", "18:00", "20:00")
+
 
 def services_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -53,15 +55,15 @@ def dates_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def times_menu() -> InlineKeyboardMarkup:
-    times = ("10:00", "12:00", "14:00", "16:00", "18:00", "20:00")
+def times_menu(unavailable: set[str] | None = None) -> InlineKeyboardMarkup:
+    unavailable = unavailable or set()
+    times = [value for value in AVAILABLE_TIMES if value not in unavailable]
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=first, callback_data=f"time:{first}"),
-                InlineKeyboardButton(text=second, callback_data=f"time:{second}"),
+                InlineKeyboardButton(text=value, callback_data=f"time:{value}")
+                for value in times[index : index + 2]
             ]
-            for first, second in zip(times[::2], times[1::2])
+            for index in range(0, len(times), 2)
         ]
     )
-

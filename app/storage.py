@@ -5,6 +5,8 @@ from pathlib import Path
 
 
 DB_PATH = Path(os.getenv("BOOKING_DB_PATH", "bookings.db"))
+MASTERS = ("Алексей", "Михаил")
+ANY_MASTER = "Любой мастер"
 
 
 def _connect() -> sqlite3.Connection:
@@ -35,8 +37,26 @@ def create_booking(
     booking_date: str,
     booking_time: str,
     phone: str,
-) -> int:
+) -> tuple[int, str] | None:
     with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        assigned_master = master
+        if master == ANY_MASTER:
+            assigned_master = next(
+                (
+                    candidate
+                    for candidate in MASTERS
+                    if _slot_is_free(
+                        connection, candidate, booking_date, booking_time
+                    )
+                ),
+                "",
+            )
+            if not assigned_master:
+                return None
+        elif not _slot_is_free(connection, master, booking_date, booking_time):
+            return None
+
         cursor = connection.execute(
             """
             INSERT INTO bookings (
@@ -46,14 +66,75 @@ def create_booking(
             (
                 user_id,
                 service,
-                master,
+                assigned_master,
                 booking_date,
                 booking_time,
                 phone,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
-        return int(cursor.lastrowid)
+        return int(cursor.lastrowid), assigned_master
+
+
+def _slot_is_free(
+    connection: sqlite3.Connection,
+    master: str,
+    booking_date: str,
+    booking_time: str,
+) -> bool:
+    occupied = connection.execute(
+        """
+        SELECT 1
+        FROM bookings
+        WHERE booking_date = ?
+          AND booking_time = ?
+          AND active = 1
+          AND master IN (?, ?)
+        LIMIT 1
+        """,
+        (booking_date, booking_time, master, ANY_MASTER),
+    ).fetchone()
+    return occupied is None
+
+
+def is_slot_available(master: str, booking_date: str, booking_time: str) -> bool:
+    with _connect() as connection:
+        if master == ANY_MASTER:
+            return any(
+                _slot_is_free(connection, candidate, booking_date, booking_time)
+                for candidate in MASTERS
+            )
+        return _slot_is_free(connection, master, booking_date, booking_time)
+
+
+def get_unavailable_times(master: str, booking_date: str) -> set[str]:
+    with _connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT booking_time, master
+            FROM bookings
+            WHERE booking_date = ? AND active = 1
+            """,
+            (booking_date,),
+        ).fetchall()
+
+    if master != ANY_MASTER:
+        return {
+            row["booking_time"]
+            for row in rows
+            if row["master"] in (master, ANY_MASTER)
+        }
+
+    unavailable = set()
+    for booking_time in {row["booking_time"] for row in rows}:
+        occupied_masters = {
+            row["master"] for row in rows if row["booking_time"] == booking_time
+        }
+        if ANY_MASTER in occupied_masters or all(
+            candidate in occupied_masters for candidate in MASTERS
+        ):
+            unavailable.add(booking_time)
+    return unavailable
 
 
 def get_active_bookings(user_id: int) -> list[sqlite3.Row]:
