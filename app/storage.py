@@ -22,11 +22,23 @@ def _connect() -> sqlite3.Connection:
             booking_date TEXT NOT NULL,
             booking_time TEXT NOT NULL,
             phone TEXT NOT NULL,
+            client_name TEXT NOT NULL DEFAULT '',
+            username TEXT,
             created_at TEXT NOT NULL,
             active INTEGER NOT NULL DEFAULT 1
         )
         """
     )
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(bookings)")
+    }
+    if "client_name" not in columns:
+        connection.execute(
+            "ALTER TABLE bookings ADD COLUMN client_name TEXT NOT NULL DEFAULT ''"
+        )
+    if "username" not in columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN username TEXT")
+    connection.commit()
     return connection
 
 
@@ -37,6 +49,8 @@ def create_booking(
     booking_date: str,
     booking_time: str,
     phone: str,
+    client_name: str = "",
+    username: str | None = None,
 ) -> tuple[int, str] | None:
     with _connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -60,8 +74,9 @@ def create_booking(
         cursor = connection.execute(
             """
             INSERT INTO bookings (
-                user_id, service, master, booking_date, booking_time, phone, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                user_id, service, master, booking_date, booking_time, phone,
+                client_name, username, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -70,6 +85,8 @@ def create_booking(
                 booking_date,
                 booking_time,
                 phone,
+                client_name,
+                username,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -150,6 +167,19 @@ def get_active_bookings(user_id: int) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def get_all_active_bookings() -> list[sqlite3.Row]:
+    with _connect() as connection:
+        return connection.execute(
+            """
+            SELECT id, user_id, service, master, booking_date, booking_time, phone,
+                   client_name, username
+            FROM bookings
+            WHERE active = 1
+            ORDER BY booking_date, booking_time, master
+            """
+        ).fetchall()
+
+
 def cancel_booking(booking_id: int, user_id: int) -> bool:
     with _connect() as connection:
         cursor = connection.execute(
@@ -159,5 +189,18 @@ def cancel_booking(booking_id: int, user_id: int) -> bool:
             WHERE id = ? AND user_id = ? AND active = 1
             """,
             (booking_id, user_id),
+        )
+        return cursor.rowcount == 1
+
+
+def cancel_booking_by_admin(booking_id: int) -> bool:
+    with _connect() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE bookings
+            SET active = 0
+            WHERE id = ? AND active = 1
+            """,
+            (booking_id,),
         )
         return cursor.rowcount == 1

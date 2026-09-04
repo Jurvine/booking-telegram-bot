@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from app.config import load_bot_token
+from app.handlers.admin import router as admin_router
 from app.handlers.menu import router as menu_router
 from app.handlers.start import router as start_router
 
@@ -27,6 +28,7 @@ def create_app() -> web.Application:
     bot = Bot(token=token)
     dispatcher = Dispatcher()
     dispatcher.include_router(start_router)
+    dispatcher.include_router(admin_router)
     dispatcher.include_router(menu_router)
 
     async def set_webhook() -> None:

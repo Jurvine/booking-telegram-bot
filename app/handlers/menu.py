@@ -1,4 +1,5 @@
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -9,6 +10,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from app.config import load_admin_ids
 from app.keyboards.main import main_menu
 from app.keyboards.services import (
     AVAILABLE_TIMES,
@@ -125,6 +127,8 @@ async def finish_booking(message: Message, state: FSMContext, phone: str) -> Non
         booking_date=data["date"],
         booking_time=data["time"],
         phone=phone,
+        client_name=message.from_user.full_name,
+        username=message.from_user.username,
     )
     if result is None:
         unavailable = get_unavailable_times(data["master"], data["date"])
@@ -145,6 +149,23 @@ async def finish_booking(message: Message, state: FSMContext, phone: str) -> Non
         f"Телефон: {phone}",
         reply_markup=main_menu(),
     )
+    username = f"@{message.from_user.username}" if message.from_user.username else "без username"
+    notification = (
+        "Новая запись! ✂️\n\n"
+        f"Клиент: {message.from_user.full_name} ({username})\n"
+        f"Telegram ID: {message.from_user.id}\n"
+        f"Телефон: {phone}\n"
+        f"Услуга: {data['service']}\n"
+        f"Мастер: {assigned_master}\n"
+        f"Дата: {data['date']}\n"
+        f"Время: {data['time']}"
+    )
+    for admin_id in load_admin_ids():
+        try:
+            await message.bot.send_message(admin_id, notification)
+        except TelegramAPIError:
+            # Ошибка одного администратора не должна ломать запись клиента.
+            pass
     await state.clear()
 
 
