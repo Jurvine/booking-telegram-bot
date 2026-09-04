@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: booking-telegram-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install .
+    startCommand: python web.py
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.14.3
+

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "booking-telegram-bot"
+version = "0.1.0"
+description = "Portfolio Telegram bot for booking services"
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "aiogram==3.31.0",
+    "aiohttp>=3.14,<4",
+    "python-dotenv>=1.1,<2",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
