@@ -1,10 +1,18 @@
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 
 from app.keyboards.main import main_menu
 from app.keyboards.services import dates_menu, masters_menu, services_menu, times_menu
 from app.states.booking import Booking
+from app.storage import cancel_booking, create_booking, get_active_bookings
 
 router = Router()
 
@@ -87,6 +95,14 @@ async def receive_phone_text(message: Message, state: FSMContext) -> None:
 
 async def finish_booking(message: Message, state: FSMContext, phone: str) -> None:
     data = await state.get_data()
+    create_booking(
+        user_id=message.from_user.id,
+        service=data["service"],
+        master=data["master"],
+        booking_date=data["date"],
+        booking_time=data["time"],
+        phone=phone,
+    )
     await message.answer(
         "Запись подтверждена! ✅\n\n"
         f"Услуга: {data['service']}\n"
@@ -101,7 +117,43 @@ async def finish_booking(message: Message, state: FSMContext, phone: str) -> Non
 
 @router.message(F.text == "Мои записи")
 async def show_bookings(message: Message) -> None:
-    await message.answer("У вас пока нет активных записей.")
+    bookings = get_active_bookings(message.from_user.id)
+    if not bookings:
+        await message.answer("У вас пока нет активных записей.")
+        return
+
+    await message.answer("Ваши активные записи:")
+    for booking in bookings:
+        await message.answer(
+            f"Услуга: {booking['service']}\n"
+            f"Мастер: {booking['master']}\n"
+            f"Дата: {booking['booking_date']}\n"
+            f"Время: {booking['booking_time']}\n"
+            f"Телефон: {booking['phone']}",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Отменить запись",
+                            callback_data=f"cancel:{booking['id']}",
+                        )
+                    ]
+                ]
+            ),
+        )
+
+
+@router.callback_query(F.data.startswith("cancel:"))
+async def cancel_user_booking(callback: CallbackQuery) -> None:
+    booking_id = int(callback.data.split(":", maxsplit=1)[1])
+    cancelled = cancel_booking(booking_id, callback.from_user.id)
+    if not cancelled:
+        await callback.answer("Запись уже отменена или не найдена", show_alert=True)
+        return
+
+    await callback.answer("Запись отменена")
+    if callback.message:
+        await callback.message.edit_text("Запись отменена ❌")
 
 
 @router.message(F.text == "Контакты")
